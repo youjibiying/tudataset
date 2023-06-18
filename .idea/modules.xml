@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/../tudataset_pro(1)/.idea/forguanlve.iml" filepath="$PROJECT_DIR$/../tudataset_pro(1)/.idea/forguanlve.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../guanzi/.idea/guanzi.iml" filepath="$PROJECT_DIR$/../guanzi/.idea/guanzi.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/tudataset.iml" filepath="$PROJECT_DIR$/.idea/tudataset.iml" />
+    </modules>
+  </component>
+</project>

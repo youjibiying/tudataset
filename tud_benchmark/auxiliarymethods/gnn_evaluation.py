@@ -2,6 +2,7 @@ import os.path as osp
 
 import numpy as np
 import torch
+import random
 import torch.nn.functional as F
 import torch_geometric.transforms as T
 from sklearn.model_selection import KFold
@@ -10,6 +11,17 @@ from torch_geometric.data import DataLoader
 from torch_geometric.datasets import TUDataset
 from torch_geometric.utils import degree
 
+
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    ## cuda 问题
+    torch.cuda.current_device()
+    torch.cuda._initialized = True
 
 class NormalizedDegree(object):
     def __init__(self, mean, std):
@@ -51,10 +63,12 @@ def test(loader, model, device):
 
 # 10-CV for GNN training and hyperparameter selection.
 def gnn_evaluation(gnn, ds_name, layers, hidden, max_num_epochs=200, batch_size=128, start_lr=0.01, min_lr = 0.000001, factor=0.5, patience=5,
-                       num_repetitions=10, all_std=True):
+                       num_repetitions=10, all_std=True,args=None):
+    print("Load dataset and shuffle")
+    setup_seed(42)
     # Load dataset and shuffle.
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'datasets', ds_name)
-    dataset = TUDataset(path, name=ds_name).shuffle()
+    dataset = TUDataset(path, name=ds_name,use_node_attr=True).shuffle()
 
     # One-hot degree if node labels are not available.
     # The following if clause is taken from  https://github.com/rusty1s/pytorch_geometric/blob/master/benchmark/kernel/datasets.py.
@@ -72,17 +86,22 @@ def gnn_evaluation(gnn, ds_name, layers, hidden, max_num_epochs=200, batch_size=
             mean, std = deg.mean().item(), deg.std().item()
             dataset.transform = NormalizedDegree(mean, std)
 
+    print('dataset.num_features',dataset.num_features)
+
     # Set device.
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda:" + str(args.gpu)) if torch.cuda.is_available() else torch.device("cpu")
+
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     test_accuracies_all = []
     test_accuracies_complete = []
-
+    k_fold=10
+    no_k_fold=True
     for i in range(num_repetitions):
         # Test acc. over all folds.
         test_accuracies = []
-        kf = KFold(n_splits=10, shuffle=True)
-        dataset.shuffle()
+        kf = KFold(n_splits=k_fold, shuffle=True)
+        # dataset.shuffle()
 
         for train_index, test_index in kf.split(list(range(len(dataset)))):
             # Sample 10% split from training split for validation.
@@ -103,14 +122,16 @@ def gnn_evaluation(gnn, ds_name, layers, hidden, max_num_epochs=200, batch_size=
             # Collect val. and test acc. over all hyperparameter combinations.
             for l in layers:
                 for h in hidden:
+                    print(f"hyperparameter combination: k-fold:{k_fold} n_layer:{l} n_hidden:{h}")
                     # Setup model.
-                    model = gnn(dataset, l, h).to(device)
+                    model = gnn(dataset, l, h, args=args).to(device)
                     model.reset_parameters()
-
                     optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
                     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
                                                                            factor=factor, patience=patience,
                                                                            min_lr=0.0000001)
+                    print(model)
+
                     for epoch in range(1, max_num_epochs + 1):
                         lr = scheduler.optimizer.param_groups[0]['lr']
                         train(train_loader, model, optimizer, device)
@@ -120,15 +141,18 @@ def gnn_evaluation(gnn, ds_name, layers, hidden, max_num_epochs=200, batch_size=
                         if val_acc > best_val_acc:
                             best_val_acc = val_acc
                             best_test = test(test_loader, model, device) * 100.0
-
+                        print(f"Epoch:{epoch}, val_acc:{val_acc}")
                         # Break if learning rate is smaller 10**-6.
                         if lr < min_lr:
                             break
 
             test_accuracies.append(best_test)
 
+
             if all_std:
                 test_accuracies_complete.append(best_test)
+            if no_k_fold:
+                break
         test_accuracies_all.append(float(np.array(test_accuracies).mean()))
 
     if all_std:
